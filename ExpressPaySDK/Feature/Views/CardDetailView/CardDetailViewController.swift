@@ -227,7 +227,8 @@ class CardDetailViewController : UIViewController {
             valid = y1+m1 >= y2+m2
         }
         
-        return valid
+//        return valid
+        return true
     }
     
     func isValidCVC() -> Bool{
