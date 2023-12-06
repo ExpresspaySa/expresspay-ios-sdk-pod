@@ -128,6 +128,7 @@ public class CardDetailViewController : UIViewController {
             let cardNumber = number.replacingOccurrences(of: " ", with: "")
             let _card = ExpressPayCard(number: number, expireMonth: Int(expiryMonth), expireYear: Int(expiryYear + 2000), cvv: cvv)
             submit(_card)
+            dismiss(animated: true)
             
         } else{
             self.doSaleTransaction()
