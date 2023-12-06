@@ -26,7 +26,12 @@ fileprivate var _order:ExpressPaySaleOrder!
 
 fileprivate var _cardNumber:String?
 fileprivate var _txnId:String?
-class CardDetailViewController : UIViewController {
+
+public class CardDetailViewController : UIViewController {
+    
+    public var amount:String = ""
+    public var currency:String = ""
+    public var onSubmitCardDetailOnly:((ExpressPayCard) -> Void)?
     
     var onPresent:(() ->Void)?
     
@@ -43,7 +48,7 @@ class CardDetailViewController : UIViewController {
     
     let cardNumberFormatter = DefaultTextInputFormatter(textPattern: "#### #### #### ####")
     let cardExpirationFormatter = DefaultTextInputFormatter(textPattern: "## / ##")
-    let cardCVVFormatter = DefaultTextInputFormatter(textPattern: "###")
+    let cardCVVFormatter = DefaultTextInputFormatter(textPattern: "####")
     
     @IBOutlet weak var lblAmount: UILabel!
     @IBOutlet weak var lblCurrency: UILabel!
@@ -74,8 +79,8 @@ class CardDetailViewController : UIViewController {
             overrideUserInterfaceStyle = .light
         }
         
-        self.lblAmount.text = _order.formatedAmountString()
-        self.lblCurrency.text = Locale.current.localizedCurrencySymbol(forCurrencyCode: _order.currency)
+        self.lblAmount.text = amount
+        self.lblCurrency.text = currency
         
         setupFormatters()
         btnSubmit.isEnabled = false
@@ -87,6 +92,11 @@ class CardDetailViewController : UIViewController {
         
         if let _onPresent = onPresent{
             _onPresent()
+        }
+        
+        if onSubmitCardDetailOnly != nil{
+            btnSubmit.setTitle("Submit", for: .normal)
+            btnSubmit.setTitle("Submit", for: .disabled)
         }
     }
     
@@ -107,7 +117,21 @@ class CardDetailViewController : UIViewController {
     
     
     @IBAction func btnSubmit(_ sender: Any) {
-        self.doSaleTransaction()
+        if let submit = onSubmitCardDetailOnly{
+            guard  let number = cardNumberFormatter.unformat(txtCardNumber.text),
+                   let cvv = cardCVVFormatter.unformat(txtCardCVV.text),
+                   let expiryYear = cardxExpiry().year,
+                   let expiryMonth = cardxExpiry().month else {
+                return
+            }
+            
+            let cardNumber = number.replacingOccurrences(of: " ", with: "")
+            let _card = ExpressPayCard(number: number, expireMonth: Int(expiryMonth), expireYear: Int(expiryYear + 2000), cvv: cvv)
+            submit(_card)
+            
+        } else{
+            self.doSaleTransaction()
+        }
     }
     
     @IBAction func nameTextChanged(_ sender: UITextField) {
@@ -154,8 +178,9 @@ class CardDetailViewController : UIViewController {
     @IBAction func cvvTextChanged(_ sender: UITextField) {
         onChange()
         sender.textColor = UIColor.black
-        if cardCVVFormatter.unformat(sender.text)?.count == 3{
-            sender.resignFirstResponder()
+        let cvvLength = cardCVVFormatter.unformat(sender.text)?.count
+        if cvvLength == 3 || cvvLength == 4{
+//            sender.resignFirstResponder()
             if isValidCVC(){
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     self.cardView.paymentCardTextFieldDidEndEditingCVC()
@@ -212,8 +237,8 @@ class CardDetailViewController : UIViewController {
     
     func isValidExpiry() -> Bool{
         let df = DateFormatter()
+        df.dateFormat = "MMYY"
         
-        df.dateFormat = "MM"
         let month = df.string(from: Date())
         
         df.dateFormat = "yy"
@@ -227,12 +252,12 @@ class CardDetailViewController : UIViewController {
             valid = y1+m1 >= y2+m2
         }
         
-//        return valid
         return true
     }
     
     func isValidCVC() -> Bool{
-        return txtCardCVV.text?.count == 3
+        let cvvLength = txtCardCVV.text?.count
+        return cvvLength == 4 || cvvLength == 3
     }
     
 }
@@ -240,11 +265,11 @@ class CardDetailViewController : UIViewController {
 
 
 extension CardDetailViewController : ExpressPayAdapterDelegate{
-    func willSendRequest(_ request: ExpressPayDataRequest) {
+    public func willSendRequest(_ request: ExpressPayDataRequest) {
         
     }
     
-    func didReceiveResponse(_ reponse: ExpressPayDataResponse?) {
+    public func didReceiveResponse(_ reponse: ExpressPayDataResponse?) {
         
     }
     
@@ -407,6 +432,9 @@ public class ExpressCardPay{
     
     func start() -> CardDetailViewController{
         let vc = CardDetailViewController(nibName: "CardDetailViewController", bundle: Bundle(for: CardDetailViewController.self))
+        
+        vc.amount = _order.formatedAmountString()
+        vc.currency = Locale.current.localizedCurrencySymbol(forCurrencyCode: _order.currency) ?? ""
         vc.onPresent = _onPresent
         
         if let navigationController = _target as? UINavigationController{
