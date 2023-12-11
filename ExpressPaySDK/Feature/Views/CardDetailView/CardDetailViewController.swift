@@ -8,7 +8,7 @@
 import Foundation
 import UIKit
 
-public typealias TransactionCallback = ((ExpressPayResponse<ExpressPaySaleResult>?, Any?) -> Void)
+public typealias TransactionCallback = ((ExpressPayResponse<ExpressPaySaleResult>?, Codable?) -> Void)
 public typealias ErrorCallback = (([String]) -> Void)
 
 fileprivate var _onTransactionSuccess:TransactionCallback?
@@ -19,13 +19,14 @@ fileprivate var _onError:ErrorCallback!
 fileprivate var _target:UIViewController?
 fileprivate var _payer:ExpressPayPayer!
 fileprivate var _order:ExpressPaySaleOrder!
+fileprivate var _saleOptions:ExpressPaySaleOptions?
+fileprivate var _card:ExpressPayCard!
+fileprivate var _cardNumber:String?
+fileprivate var _txnId:String?
 
 // https://github.com/card-io/card.io-iOS-SDK
 // https://github.com/orazz/CreditCardForm-iOS
 // https://github.com/luximetr/AnyFormatKit
-
-fileprivate var _cardNumber:String?
-fileprivate var _txnId:String?
 
 public class CardDetailViewController : UIViewController {
     
@@ -286,20 +287,15 @@ extension CardDetailViewController : ExpressPayAdapterDelegate{
             return
         }
         
-        _cardNumber = number.replacingOccurrences(of: " ", with: "")
-        
-        
-        let _card = ExpressPayCard(number: number, expireMonth: Int(expiryMonth), expireYear: Int(expiryYear + 2000), cvv: cvv)
-        
-        
-        let saleOptions:ExpressPaySaleOptions? = nil //ExpressPaySaleOptions(channelId: "", recurringInit: false)
+        _card = ExpressPayCard(number: number, expireMonth: Int(expiryMonth), expireYear: Int(expiryYear + 2000), cvv: cvv)
+        _saleOptions = nil //ExpressPaySaleOptions(channelId: "", recurringInit: false)
         
         showLoading()
         saleAdapter.execute(order: _order,
                             card: _card,
                             payer: _payer,
                             termUrl3ds: ExpressPayProcessCompleteCallbackUrl,
-                            options: saleOptions,
+                            options: _saleOptions,
                             auth: false) { [weak self] (response) in
             
             hideLoading()
@@ -323,7 +319,6 @@ extension CardDetailViewController : ExpressPayAdapterDelegate{
                     
                 case .redirect(let redirectResult):
                     debugPrint(redirectResult)
-                    _txnId = redirectResult.transactionId
                     self.redirect(response: response, sale3dsRedirectResponse:redirectResult)
                     
                 case .decline(let declineResult):
@@ -342,7 +337,7 @@ extension CardDetailViewController : ExpressPayAdapterDelegate{
                 
             case .failure(let errorResult):
                 debugPrint(errorResult)
-                _onTransactionFailure?(response, errorResult)
+                _onError?([errorResult.localizedDescription])
                 
             }
         }
@@ -368,19 +363,26 @@ extension CardDetailViewController : ExpressPayAdapterDelegate{
     func redirect(response:ExpressPayResponse<ExpressPaySaleResult>, sale3dsRedirectResponse:ExpressPaySaleRedirect){
         
         SaleRedirectionView()
-            .setup(response: sale3dsRedirectResponse, onTransactionSuccess: { result in
-                if let txnId = result.transactionId{
-                    self.checkTransactionStatus(saleResponse: response, transactionId: txnId)
-                }else{
-                    _onTransactionFailure?(response, "Something went wrong (Transaction ID not returned on success response)")
+            .setup(
+                response: sale3dsRedirectResponse,
+                payer: _payer,
+                order: _order,
+                saleOptions: _saleOptions,
+                card: _card,
+                onTransactionSuccess: { result in
+                    if result.status == .settled{
+                        print("Transaction settled: \(result)")
+                        _onTransactionSuccess?(response, result)
+                    }else{
+                        _onTransactionFailure?(response, result)
+                    }
+                },
+                onTransactionFailure: { error in
+                    print("onTransactionFailure: \(error)")
+                    _onTransactionFailure?(response, error)
+                    
                 }
-
-                
-            }, onTransactionFailure: { error in
-                print("onTransactionFailure: \(error)")
-                _onTransactionFailure?(response, error)
-                
-            })
+            )
             .enableLogs()
             .show(owner: self, onStartIn: { viewController in
                 print("onStart: \(viewController)")
@@ -388,41 +390,41 @@ extension CardDetailViewController : ExpressPayAdapterDelegate{
             }, onError: { error in
                 print("onError: \(error)")
                 
-            })
+            }
+        )
 
     }
     
     func checkTransactionStatus(saleResponse:ExpressPayResponse<ExpressPaySaleResult>, transactionId:String){
         print("Checking transaction status for transaction id: \(transactionId)")
-        if let cardNumber = _cardNumber, let txn = _txnId{
-            getTransactionDetailAdapter.execute(
-                transactionId: txn,
-                payerEmail: _payer.email,
-                cardNumber: cardNumber) { response in
-                
-                    switch response {
-                    case .result(let result):
-                        
-                        switch result {
-                        case .success(let successResult):
-                            if successResult.status == .settled{
-                                print("Transaction settled: \(successResult)")
-                                _onTransactionSuccess?(saleResponse, successResult)
-                            }else{
-                                _onTransactionFailure?(saleResponse, successResult)
-                            }
+        let _cardNumber = _card.number.replacingOccurrences(of: " ", with: "")
+        getTransactionDetailAdapter.execute(
+            transactionId: transactionId,
+            payerEmail: _payer.email,
+            cardNumber: _cardNumber) { response in
+            
+                switch response {
+                case .result(let result):
+                    
+                    switch result {
+                    case .success(let successResult):
+                        if successResult.status == .settled{
+                            print("Transaction settled: \(successResult)")
+                            _onTransactionSuccess?(saleResponse, successResult)
+                        }else{
+                            _onTransactionFailure?(saleResponse, successResult)
                         }
-                                        
-                    case .error(let errorResult):
-                        debugPrint(errorResult)
-                        _onTransactionFailure?(saleResponse, response)
-                        
-                    case .failure(let errorResult):
-                        debugPrint(errorResult)
-                        _onTransactionFailure?(saleResponse, errorResult)
-                        
                     }
-            }
+                                    
+                case .error(let errorResult):
+                    debugPrint(errorResult)
+                    _onTransactionFailure?(saleResponse, errorResult)
+                    
+                case .failure(let errorResult):
+                    debugPrint(errorResult)
+                    _onError?([errorResult.localizedDescription])
+                    
+                }
         }
     }
 }

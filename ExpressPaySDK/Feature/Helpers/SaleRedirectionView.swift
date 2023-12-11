@@ -19,15 +19,28 @@ public class SaleRedirectionView : WKWebView{
     
     var onLoading:((Bool) -> Void)? = nil
     private var logs:Bool = false
+    
     private var response:ExpressPaySaleRedirect!
+    private var payer:ExpressPayPayer!
+    private var order:ExpressPaySaleOrder!
+    private var saleOptions:ExpressPaySaleOptions?
+    private var card:ExpressPayCard!
     
     private var onStartIn:((UIViewController)->Void)?
     private var onError:((String)->Void)?
     
-    private var onTransactionSuccess:((ExpressPay3dsResponse)->Void)?
-    private var onTransactionFailure:((ExpressPay3dsResponse)->Void)?
+    private var onTransactionSuccess:((ExpressPayGetTransactionDetailsSuccess)->Void)?
+    private var onTransactionFailure:((ExpressPayError)->Void)?
     
     private var sale3dsViewController:Secure3DSVC!
+    
+    
+    
+    private lazy var getTransactionDetailAdapter: ExpressPayGetTransactionDetailsAdapter = {
+        let adapter = ExpressPayAdapterFactory().createGetTransactionDetails()
+        adapter.delegate = self
+        return adapter
+    }()
 
     override init(frame: CGRect, configuration:WKWebViewConfiguration) {
         super.init(frame: frame, configuration:configuration)
@@ -48,9 +61,21 @@ public class SaleRedirectionView : WKWebView{
         onStartIn?(sale3dsViewController)
     }
     
-    public func setup(response:ExpressPaySaleRedirect, onTransactionSuccess:((ExpressPay3dsResponse)->Void)?, onTransactionFailure:((ExpressPay3dsResponse)->Void)?) -> SaleRedirectionView{
+    public func setup(
+        response:ExpressPaySaleRedirect,
+        payer:ExpressPayPayer!,
+        order:ExpressPaySaleOrder!,
+        saleOptions:ExpressPaySaleOptions?,
+        card:ExpressPayCard!,
+        onTransactionSuccess:((ExpressPayGetTransactionDetailsSuccess)->Void)?,
+        onTransactionFailure:((ExpressPayError)->Void)?
+    ) -> SaleRedirectionView{
         
         self.response = response
+        self.payer = payer
+        self.order = order
+        self.saleOptions = saleOptions
+        self.card = card
         self.onTransactionFailure = onTransactionFailure
         self.onTransactionSuccess = onTransactionSuccess
         
@@ -101,6 +126,7 @@ public class SaleRedirectionView : WKWebView{
 
 }
 
+
 extension SaleRedirectionView : WKNavigationDelegate{
     
     public func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
@@ -129,30 +155,11 @@ extension SaleRedirectionView : WKNavigationDelegate{
         }
         
         if url.lowercased().starts(with: ExpressPayProcessCompleteCallbackUrl){
-            operationCompleted(
-                result: response3ds ?? ExpressPay3dsResponse(
-                    orderId: response.orderId, transactionId: response.transactionId,
-                    ciphertext: nil, nonce: nil, tag: nil,
-                    result: .failure, gatewayRecommendation: .dontProceed
-                )
-            )
+            checkTransactionStatus()
             decisionHandler(.cancel)
             return
         }
         decisionHandler(.allow)
-    }
-    
-    private func operationCompleted(result:ExpressPay3dsResponse){
-        webViewLoading(false)
-        if result.result == .success{
-            self.sale3dsViewController.dismiss(animated: true) {
-                self.onTransactionSuccess?(result)
-            }
-        }else if result.result == .failure{
-            self.sale3dsViewController.dismiss(animated: true) {
-                self.onTransactionFailure?(result)
-            }
-        }
     }
     
     private func parseHttpBody(httpBody:Data) -> ExpressPay3dsResponse?{
@@ -192,6 +199,50 @@ extension SaleRedirectionView : WKNavigationDelegate{
     
     public func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
         webViewLoading(false)
+    }
+}
+
+extension SaleRedirectionView : ExpressPayAdapterDelegate{
+    public func willSendRequest(_ request: ExpressPayDataRequest) {
+        
+    }
+    
+    public func didReceiveResponse(_ reponse: ExpressPayDataResponse?) {
+        
+    }
+    
+    
+    func checkTransactionStatus(){
+        print("Checking transaction status for transaction id: \(response.transactionId)")
+        
+        getTransactionDetailAdapter.execute(
+            transactionId: response.transactionId,
+            payerEmail: payer.email,
+            cardNumber: card.number.replacingOccurrences(of: " ", with: "")
+        ){ response in
+
+            self.sale3dsViewController.dismiss(animated: true){
+                
+                switch response {
+                case .result(let result):
+
+                    switch result {
+                    case .success(let successResult):
+                        self.onTransactionSuccess?(successResult)
+                    }
+
+                case .error(let errorResult):
+                    debugPrint(errorResult)
+                    self.onTransactionFailure?(errorResult)
+
+                case .failure(let failureResult):
+                    debugPrint(failureResult)
+                    self.onError?("Error while performing transaction detail call: \(failureResult.localizedDescription)")
+
+                }
+            }
+            
+        }
     }
 }
 
