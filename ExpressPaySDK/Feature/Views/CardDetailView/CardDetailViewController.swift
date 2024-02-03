@@ -407,7 +407,7 @@ public class ExpressCardPay{
     func start() -> CardDetailViewController{
         let vc = CardDetailViewController(nibName: "CardDetailViewController", bundle: Bundle(for: CardDetailViewController.self))
         vc.onPresent = _onPresent
-        
+
         if let navigationController = _target as? UINavigationController{
             navigationController.pushViewController(vc, animated: true)
         }else if let viewController = _target{
@@ -415,7 +415,7 @@ public class ExpressCardPay{
         }
         return vc
     }
-    
+
     class public func viewController(target:UIViewController,
                                           payer:ExpressPayPayer,
                                           order:ExpressPaySaleOrder,
@@ -430,7 +430,7 @@ public class ExpressCardPay{
             _onTransactionFailure = transactionFailure
             _onError = onError
             _onPresent = onPresent
-        
+
         return CardDetailViewController(nibName: "CardDetailViewController", bundle: Bundle(for: CardDetailViewController.self))
     }
 }
@@ -438,29 +438,29 @@ public class ExpressCardPay{
 
 // Payment Properties Setters
 extension ExpressCardPay{
-    
+
     public func initialize(target:UIViewController, onError:@escaping ErrorCallback, onPresent:(() ->Void)?) -> UIViewController{
         _target = target
         _onError = onError
         _onPresent = onPresent
         return start()
     }
-    
+
     public func on(transactionSuccess:@escaping TransactionCallback) -> ExpressCardPay{
         _onTransactionSuccess = transactionSuccess
         return self
     }
-    
+
     public func on(transactionFailure:@escaping TransactionCallback) -> ExpressCardPay{
         _onTransactionFailure = transactionFailure
         return self
     }
-    
+
     public func set(payer:ExpressPayPayer) -> ExpressCardPay{
         _payer = payer
         return self
     }
-    
+
     public func set(order:ExpressPaySaleOrder) -> ExpressCardPay{
         _order = order
         return self
@@ -473,69 +473,69 @@ private extension ExpressCardPay{
     func validate() -> (valid:Bool, validationErrors:[String] ){
         var errors:[String] = []
         var valid = true
-        
-        
+
+
         if _onTransactionSuccess == nil{
             valid = valid && false
             errors.append("onTransactionFailure not set, try to call function 'ExpressApplePay.on(transactionSuccess:)'")
         }
-        
+
         if _onTransactionFailure == nil{
             valid = valid && false
             errors.append("onTransactionFailure not set, try to call function 'ExpressApplePay.on(transactionFailure:)'")
         }
-        
+
         if !(_order.amount >= 1){
             valid = valid && false
             errors.append("Missing or invalid amount should be greater than 1.00")
         }
-        
+
         if _order.currency.count != 3{
             valid = valid && false
             errors.append("Missing or invalid currency code (example: 'SAR' for Saudi Riyal)")
         }
-        
+
         if _order.country.count != 2{
             valid = valid && false
             errors.append("Missing or invalid country code (example:'SA' for SaudiArabia)")
         }
-        
-        
+
+
         if !(_payer.firstName.isEmpty){
             valid = valid && false
             errors.append("Missing or invalid payer first name")
         }
-        
+
         if !(_payer.lastName.isEmpty){
             valid = valid && false
             errors.append("Missing or invalid payer last name")
         }
-        
+
         if !(_payer.address.isEmpty){
             valid = valid && false
             errors.append("Missing or invalid adress as payer information")
         }
-        
+
         if !(_payer.country.isEmpty){
             valid = valid && false
             errors.append("Missing or invalid  country as payer information")
         }
-        
+
         if !(_payer.city.isEmpty){
             valid = valid && false
             errors.append("Missing or invalid city as payer information")
         }
-        
+
         if !(_payer.phone.isPhoneNumber()){
             valid = valid && false
             errors.append("Missing or invalid phone number. ([0-9٠-٩]{8,})")
         }
-        
+
         if !(_payer.email.isEmail()){
             valid = valid && false
             errors.append("Missing or invalid email. ([A-Z0-9a-z._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,64})")
         }
-        
+
         return (valid, errors)
     }
 }
