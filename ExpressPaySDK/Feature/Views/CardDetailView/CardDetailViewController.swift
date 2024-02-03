@@ -8,7 +8,7 @@
 import Foundation
 import UIKit
 
-public typealias TransactionCallback = ((ExpressPayResponse<ExpressPaySaleResult>?, Codable?) -> Void)
+public typealias TransactionCallback = ((ExpressPayResponse<ExpressPaySaleResult>?, Any?) -> Void)
 public typealias ErrorCallback = (([String]) -> Void)
 
 fileprivate var _onTransactionSuccess:TransactionCallback?
@@ -19,133 +19,107 @@ fileprivate var _onError:ErrorCallback!
 fileprivate var _target:UIViewController?
 fileprivate var _payer:ExpressPayPayer!
 fileprivate var _order:ExpressPaySaleOrder!
-fileprivate var _saleOptions:ExpressPaySaleOptions?
-fileprivate var _card:ExpressPayCard!
-fileprivate var _cardNumber:String?
-fileprivate var _txnId:String?
 
 // https://github.com/card-io/card.io-iOS-SDK
 // https://github.com/orazz/CreditCardForm-iOS
 // https://github.com/luximetr/AnyFormatKit
 
-public class CardDetailViewController : UIViewController {
-    
-    public var amount:String = ""
-    public var currency:String = ""
-    public var onSubmitCardDetailOnly:((ExpressPayCard) -> Void)?
-    
+fileprivate var _cardNumber:String?
+fileprivate var _txnId:String?
+class CardDetailViewController : UIViewController {
+
     var onPresent:(() ->Void)?
-    
+
     @IBOutlet weak var btnSubmit: UIButton!
     @IBOutlet weak var cardView: CreditCardFormView!
     @IBOutlet weak var txtCardHolderName: UITextField!
     @IBOutlet weak var txtCardNumber: UITextField!
     @IBOutlet weak var txtCardExpiry: UITextField!
     @IBOutlet weak var txtCardCVV: UITextField!
-    
+
     let cardNumberInputController = TextFieldInputController(allowdTextRegex: "")
     let cardExpirationInputController = TextFieldInputController(allowdTextRegex: "")
     let cardCVVInputController = TextFieldInputController(allowdTextRegex: "")
-    
+
     let cardNumberFormatter = DefaultTextInputFormatter(textPattern: "#### #### #### ####")
     let cardExpirationFormatter = DefaultTextInputFormatter(textPattern: "## / ##")
     let cardCVVFormatter = DefaultTextInputFormatter(textPattern: "####")
-    
+
     @IBOutlet weak var lblAmount: UILabel!
     @IBOutlet weak var lblCurrency: UILabel!
-    
+
     private lazy var saleAdapter: ExpressPaySaleAdapter = {
         let adapter = ExpressPayAdapterFactory().createSale()
         adapter.delegate = self
         return adapter
     }()
-    
+
     private lazy var getTransactionStatusAdapter: ExpressPayGetTransactionStatusAdapter = {
         let adapter = ExpressPayAdapterFactory().createGetTransactionStatus()
         adapter.delegate = self
         return adapter
     }()
-    
+
     private lazy var getTransactionDetailAdapter: ExpressPayGetTransactionDetailsAdapter = {
         let adapter = ExpressPayAdapterFactory().createGetTransactionDetails()
         adapter.delegate = self
         return adapter
     }()
-    
+
     public override func viewDidLoad() {
         super.viewDidLoad()
         print("viewDidLoad")
-        
+
         if #available(iOS 13.0, *) {
             overrideUserInterfaceStyle = .light
         }
-        
-        self.lblAmount.text = amount
-        self.lblCurrency.text = currency
-        
+
+        self.lblAmount.text = _order.formatedAmountString()
+        self.lblCurrency.text = Locale.current.localizedCurrencySymbol(forCurrencyCode: _order.currency)
+
         setupFormatters()
         btnSubmit.isEnabled = false
-        
+
         txtCardHolderName.addDoneButtonOnKeyboard()
         txtCardNumber.addDoneButtonOnKeyboard()
         txtCardExpiry.addDoneButtonOnKeyboard()
         txtCardCVV.addDoneButtonOnKeyboard()
-        
+
         if let _onPresent = onPresent{
             _onPresent()
         }
-        
-        if onSubmitCardDetailOnly != nil{
-            btnSubmit.setTitle("Submit", for: .normal)
-            btnSubmit.setTitle("Submit", for: .disabled)
-        }
     }
-    
+
     func setupFormatters(){
         cardNumberInputController.formatter = cardNumberFormatter
         txtCardNumber.delegate = cardNumberInputController
         txtCardNumber.text = cardNumberFormatter.format("")
-    
+
         cardExpirationInputController.formatter = cardExpirationFormatter
         txtCardExpiry.delegate = cardExpirationInputController
         txtCardExpiry.text = cardExpirationFormatter.format("")
-    
+
         cardCVVInputController.formatter = cardCVVFormatter
         txtCardCVV.delegate = cardCVVInputController
         txtCardCVV.text = cardCVVFormatter.format("")
     }
-    
-    
-    
+
+
+
     @IBAction func btnSubmit(_ sender: Any) {
-        if let submit = onSubmitCardDetailOnly{
-            guard  let number = cardNumberFormatter.unformat(txtCardNumber.text),
-                   let cvv = cardCVVFormatter.unformat(txtCardCVV.text),
-                   let expiryYear = cardxExpiry().year,
-                   let expiryMonth = cardxExpiry().month else {
-                return
-            }
-            
-            let cardNumber = number.replacingOccurrences(of: " ", with: "")
-            let _card = ExpressPayCard(number: number, expireMonth: Int(expiryMonth), expireYear: Int(expiryYear + 2000), cvv: cvv)
-            submit(_card)
-            dismiss(animated: true)
-            
-        } else{
-            self.doSaleTransaction()
-        }
+        self.doSaleTransaction()
     }
-    
+
     @IBAction func nameTextChanged(_ sender: UITextField) {
         onChange()
     }
-    
-    
+
+
     @IBAction func numberTextChanged(_ sender: UITextField) {
         onChange()
         sender.textColor = UIColor.black
         let number = cardNumberFormatter.unformat(sender.text)
-        if number?.count == 16{
+        if (number?.count == 16){
             if isValidCardNumber(number: number){
                 txtCardExpiry.becomeFirstResponder()
             }else{
@@ -156,8 +130,8 @@ public class CardDetailViewController : UIViewController {
             txtCardHolderName.becomeFirstResponder()
         }
     }
-    
-    
+
+
     @IBAction func expiryTextChanged(_ sender: UITextField) {
         onChange()
         sender.textColor = UIColor.black
@@ -175,14 +149,13 @@ public class CardDetailViewController : UIViewController {
             txtCardNumber.becomeFirstResponder()
         }
     }
-    
-    
+
+
     @IBAction func cvvTextChanged(_ sender: UITextField) {
         onChange()
         sender.textColor = UIColor.black
-        let cvvLength = cardCVVFormatter.unformat(sender.text)?.count
-        if cvvLength == 3 || cvvLength == 4{
-//            sender.resignFirstResponder()
+        if cardCVVFormatter.unformat(sender.text)?.count == 4{
+            sender.resignFirstResponder()
             if isValidCVC(){
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                     self.cardView.paymentCardTextFieldDidEndEditingCVC()
@@ -195,13 +168,13 @@ public class CardDetailViewController : UIViewController {
             txtCardExpiry.becomeFirstResponder()
         }
     }
-    
+
     func onChange(){
         let name = txtCardHolderName.text
         let number = cardExpirationFormatter.unformat(txtCardNumber.text) ?? ""
         let expiry = cardxExpiry()
         let cvv = cardExpirationFormatter.unformat(txtCardCVV.text)
-        
+
 
         cardView.cardHolderString = name ?? ""
         cardView.paymentCardTextFieldDidChange(
@@ -210,140 +183,144 @@ public class CardDetailViewController : UIViewController {
             expirationMonth: expiry.month,
             cvc: cvv
         )
-        
+
         let unformateNumber = number.replacingOccurrences(of: " ", with: "")
         btnSubmit.isEnabled = isValidExpiry() && isValidCardNumber(number: unformateNumber) && isValidCVC()
     }
-    
+
     func cardxExpiry() -> (month:UInt?, year:UInt?){
         let expiry = cardExpirationFormatter.unformat(txtCardExpiry.text) ?? "0"
-        
+
         if expiry.count == 1 || expiry.count == 2{
             return (UInt(expiry), 0)
         }
-        
+
         if expiry.count == 3{
             return (UInt(expiry.prefix(2)), UInt(expiry.suffix(1)))
         }
-        
+
         if expiry.count == 4{
             return (UInt(expiry.prefix(2)), UInt(expiry.suffix(2)))
         }
-        
+
         return (0,0)
     }
-    
+
     func isValidCardNumber(number:String?) -> Bool{
-        return (number ?? "").count == 16 || cardView.cardBrand != .NONE
+        return ((number ?? "").count == 15 || (number ?? "").count == 16) || cardView.cardBrand != .NONE
     }
-    
+
     func isValidExpiry() -> Bool{
         let df = DateFormatter()
-        
+
         df.dateFormat = "MM"
         let month = df.string(from: Date())
-        
+
         df.dateFormat = "yy"
         let year = df.string(from: Date())
-        
+
         let expiry = cardxExpiry()
-        
+
         var valid = false
         if let y1 = expiry.year, let m1 = expiry.month,
            let y2 = UInt(year), let m2 = UInt(month){
-            if y1 > y2 { return true }
-            if y1 == y2 && m1 >= m2 { return true }
+            valid = y1+m1 >= y2+m2
         }
-        
-        return false
+
+        return valid
     }
-    
+
     func isValidCVC() -> Bool{
-        let cvvLength = txtCardCVV.text?.count
-        return cvvLength == 4 || cvvLength == 3
+        return (txtCardCVV.text?.count == 3 || txtCardCVV.text?.count == 4 )
     }
-    
+
 }
 
 
 
 extension CardDetailViewController : ExpressPayAdapterDelegate{
-    public func willSendRequest(_ request: ExpressPayDataRequest) {
-        
+    func willSendRequest(_ request: ExpressPayDataRequest) {
+
     }
-    
-    public func didReceiveResponse(_ reponse: ExpressPayDataResponse?) {
-        
+
+    func didReceiveResponse(_ reponse: ExpressPayDataResponse?) {
+
     }
-    
-    
+
+
     func doSaleTransaction(){
-        
-        
+
+
         guard  let number = cardNumberFormatter.unformat(txtCardNumber.text),
                let cvv = cardCVVFormatter.unformat(txtCardCVV.text),
                let expiryYear = cardxExpiry().year,
                let expiryMonth = cardxExpiry().month else {
             return
         }
-        
-        _card = ExpressPayCard(number: number, expireMonth: Int(expiryMonth), expireYear: Int(expiryYear + 2000), cvv: cvv)
-        _saleOptions = nil //ExpressPaySaleOptions(channelId: "", recurringInit: false)
-        
+
+        _cardNumber = number.replacingOccurrences(of: " ", with: "")
+
+
+        let _card = ExpressPayCard(number: number, expireMonth: Int(expiryMonth), expireYear: Int(expiryYear + 2000), cvv: cvv)
+
+
+        let saleOptions:ExpressPaySaleOptions? = nil //ExpressPaySaleOptions(channelId: "", recurringInit: false)
+
         showLoading()
         saleAdapter.execute(order: _order,
                             card: _card,
                             payer: _payer,
                             termUrl3ds: ExpressPayProcessCompleteCallbackUrl,
-                            options: _saleOptions,
+                            options: saleOptions,
                             auth: false) { [weak self] (response) in
-            
+
             hideLoading()
-            
+
             guard let self = self else { return }
-            
+
             switch response {
             case .result(let result):
-                
+
                 switch result {
                 case .recurring(let recurringResult):
                     debugPrint(recurringResult)
                     self.checkTransactionStatus(saleResponse: response, transactionId: recurringResult.transactionId)
-                    
+
                 case .secure3d(let result3ds):
                     debugPrint(result3ds)
                     self.openRedirect3Ds(termUrl: result3ds.redirectParams.termUrl,
                                          termUrl3Ds: "",
                                          redirectUrl: result3ds.redirectUrl,
                                          paymentRequisites: result3ds.redirectParams.paymentRequisites)
-                    
+
                 case .redirect(let redirectResult):
                     debugPrint(redirectResult)
+                    _txnId = redirectResult.transactionId
                     self.redirect(response: response, sale3dsRedirectResponse:redirectResult)
-                    
+
                 case .decline(let declineResult):
                     debugPrint(declineResult)
                     self.checkTransactionStatus(saleResponse: response, transactionId: declineResult.transactionId)
-                    
+
                 case .success(let successResult):
                     debugPrint(successResult)
                     self.checkTransactionStatus(saleResponse: response, transactionId: successResult.transactionId)
-                    
+
                 }
-                                
+
             case .error(let errorResult):
                 debugPrint(errorResult)
                 _onTransactionFailure?(response, errorResult)
-                
+
             case .failure(let errorResult):
                 debugPrint(errorResult)
-                _onError?([errorResult.localizedDescription])
-                
+                _onTransactionFailure?(response, errorResult)
+
             }
         }
     }
-    
-    
+
+
     func openRedirect3Ds(termUrl: String,
                          termUrl3Ds: String,
                          redirectUrl: String,
@@ -359,86 +336,76 @@ extension CardDetailViewController : ExpressPayAdapterDelegate{
 //        let navigation = UINavigationController(rootViewController: redirect3DsVC)
 //        present(navigation, animated: true, completion: nil)
     }
-    
+
     func redirect(response:ExpressPayResponse<ExpressPaySaleResult>, sale3dsRedirectResponse:ExpressPaySaleRedirect){
-        
+
         SaleRedirectionView()
-            .setup(
-                response: sale3dsRedirectResponse,
-                payer: _payer,
-                order: _order,
-                saleOptions: _saleOptions,
-                card: _card,
-                onTransactionSuccess: { result in
-                    if result.status == .settled{
-                        print("Transaction settled: \(result)")
-                        _onTransactionSuccess?(response, result)
-                    }else{
-                        _onTransactionFailure?(response, result)
-                    }
-                },
-                onTransactionFailure: { error in
-                    print("onTransactionFailure: \(error)")
-                    _onTransactionFailure?(response, error)
-                    
+            .setup(response: sale3dsRedirectResponse, onTransactionSuccess: { result in
+                if let txnId = result.transactionId{
+                    self.checkTransactionStatus(saleResponse: response, transactionId: txnId)
+                }else{
+                    _onTransactionFailure?(response, "Something went wrong (Transaction ID not returned on success response)")
                 }
-            )
+
+
+            }, onTransactionFailure: { error in
+                print("onTransactionFailure: \(error)")
+                _onTransactionFailure?(response, error)
+
+            })
             .enableLogs()
             .show(owner: self, onStartIn: { viewController in
                 print("onStart: \(viewController)")
-                
+
             }, onError: { error in
                 print("onError: \(error)")
-                
-            }
-        )
+
+            })
 
     }
-    
+
     func checkTransactionStatus(saleResponse:ExpressPayResponse<ExpressPaySaleResult>, transactionId:String){
         print("Checking transaction status for transaction id: \(transactionId)")
-        let _cardNumber = _card.number.replacingOccurrences(of: " ", with: "")
-        getTransactionDetailAdapter.execute(
-            transactionId: transactionId,
-            payerEmail: _payer.email,
-            cardNumber: _cardNumber) { response in
-            
-                switch response {
-                case .result(let result):
-                    
-                    switch result {
-                    case .success(let successResult):
-                        if successResult.status == .settled{
-                            print("Transaction settled: \(successResult)")
-                            _onTransactionSuccess?(saleResponse, successResult)
-                        }else{
-                            _onTransactionFailure?(saleResponse, successResult)
+        if let cardNumber = _cardNumber, let txn = _txnId{
+            getTransactionDetailAdapter.execute(
+                transactionId: txn,
+                payerEmail: _payer.email,
+                cardNumber: cardNumber) { response in
+
+                    switch response {
+                    case .result(let result):
+
+                        switch result {
+                        case .success(let successResult):
+                            if successResult.status == .settled{
+                                print("Transaction settled: \(successResult)")
+                                _onTransactionSuccess?(saleResponse, successResult)
+                            }else{
+                                _onTransactionFailure?(saleResponse, successResult)
+                            }
                         }
+
+                    case .error(let errorResult):
+                        debugPrint(errorResult)
+                        _onTransactionFailure?(saleResponse, response)
+
+                    case .failure(let errorResult):
+                        debugPrint(errorResult)
+                        _onTransactionFailure?(saleResponse, errorResult)
+
                     }
-                                    
-                case .error(let errorResult):
-                    debugPrint(errorResult)
-                    _onTransactionFailure?(saleResponse, errorResult)
-                    
-                case .failure(let errorResult):
-                    debugPrint(errorResult)
-                    _onError?([errorResult.localizedDescription])
-                    
-                }
+            }
         }
     }
 }
 
 
 public class ExpressCardPay{
-    
+
     public init() {}
-    
+
     func start() -> CardDetailViewController{
         let vc = CardDetailViewController(nibName: "CardDetailViewController", bundle: Bundle(for: CardDetailViewController.self))
-        
-        vc.amount = _order.formatedAmountString()
-        vc.currency = Locale.current.localizedCurrencySymbol(forCurrencyCode: _order.currency) ?? ""
         vc.onPresent = _onPresent
         
         if let navigationController = _target as? UINavigationController{
