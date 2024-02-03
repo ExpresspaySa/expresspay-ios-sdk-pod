@@ -339,16 +339,34 @@ extension CardDetailViewController : ExpressPayAdapterDelegate{
 
     func redirect(response:ExpressPayResponse<ExpressPaySaleResult>, sale3dsRedirectResponse:ExpressPaySaleRedirect){
 
-        SaleRedirectionView()
-            .setup(response: sale3dsRedirectResponse, onTransactionSuccess: { result in
-                if let txnId = result.transactionId{
-                    self.checkTransactionStatus(saleResponse: response, transactionId: txnId)
-                }else{
-                    _onTransactionFailure?(response, "Something went wrong (Transaction ID not returned on success response)")
-                }
+        guard  let number = cardNumberFormatter.unformat(txtCardNumber.text),
+               let cvv = cardCVVFormatter.unformat(txtCardCVV.text),
+               let expiryYear = cardxExpiry().year,
+               let expiryMonth = cardxExpiry().month else {
+            return
+        }
+
+        _cardNumber = number.replacingOccurrences(of: " ", with: "")
 
 
-            }, onTransactionFailure: { error in
+        let _card = ExpressPayCard(number: number, expireMonth: Int(expiryMonth), expireYear: Int(expiryYear + 2000), cvv: cvv)
+
+
+        let saleOptions:ExpressPaySaleOptions? = nil //ExpressPaySaleOptions(channelId: "", recurringInit: false)
+
+        SaleRedirectionView().setup(response: sale3dsRedirectResponse, payer: _payer,
+                                    order: _order,
+                                saleOptions:saleOptions,
+                                    card: _card,
+                                    onTransactionSuccess: { result in
+            if !result.transactionId.isEmpty {
+                self.checkTransactionStatus(saleResponse: response, transactionId: result.transactionId)
+            } else {
+                _onTransactionFailure?(response, "Something went wrong (Transaction ID not returned on success response)")
+            }
+
+            
+        }, onTransactionFailure: { error in
                 print("onTransactionFailure: \(error)")
                 _onTransactionFailure?(response, error)
 
